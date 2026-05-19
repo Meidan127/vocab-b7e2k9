@@ -52,6 +52,10 @@
   th { font-size: 12px; color: var(--muted); font-weight: 600; text-align: left; background: var(--row-alt); position: sticky; top: 53px; }
   tr:hover td { background: #fcfcfa; }
   td.no { color: var(--muted); width: 36px; text-align: right; font-variant-numeric: tabular-nums; }
+  td.star, th.star { width: 30px; text-align: center; padding-left: 4px; padding-right: 4px; }
+  .star-btn { cursor: pointer; font-size: 16px; color: #d4d4d4; user-select: none; }
+  .star-btn.on { color: #f5b301; }
+  .star-btn:hover { color: #f5b301; }
   td.audio { width: 40px; text-align: center; }
   td.word { font-size: 17px; font-weight: 600; min-width: 130px; }
   td.ipa { color: #555; font-family: "Doulos SIL", "Charis SIL", "Lucida Sans Unicode", serif; min-width: 110px; }
@@ -86,6 +90,8 @@
     td.audio, th.audio { display: none; }
     td.example { font-style: italic; color: #333; }
     .play-btn { display: none !important; }
+    .star-btn:not(.on) { visibility: hidden; }
+    .star-btn.on { color: #000 !important; }
     tr { page-break-inside: avoid; }
     thead { display: table-header-group; }
   }
@@ -104,6 +110,7 @@
       <option value="no-desc">No 倒序 (N → 1)</option>
       <option value="alpha-asc">字母 A → Z</option>
       <option value="alpha-desc">字母 Z → A</option>
+      <option value="star">★ 星标优先</option>
     </select>
     <input type="search" id="search" placeholder="搜索单词…" style="width: 140px">
     <button id="play-all" title="按顺序播放可见的所有单词">▶ 播放全部</button>
@@ -114,10 +121,11 @@
 <main>
   <table>
     <colgroup>
-      <col style="width:36px"><col style="width:40px"><col><col><col><col><col>
+      <col style="width:30px"><col style="width:36px"><col style="width:40px"><col><col><col><col><col>
     </colgroup>
     <thead>
       <tr>
+        <th class="star">★</th>
         <th class="no">No</th>
         <th class="audio">🔊</th>
         <th>单词</th>
@@ -140,6 +148,16 @@
 let DATA = { words: [], sources: [] };
 
 function audioId(w) { return String(w).toLowerCase().replace(/[^a-z0-9]/g, '_'); }
+
+// ---- 星标：标记反复出错的词。存浏览器 localStorage，逐设备保存 ----
+const STAR_KEY = 'vocab-stars-v1';
+let STARS = new Set();
+try { STARS = new Set(JSON.parse(localStorage.getItem(STAR_KEY) || '[]')); } catch (e) {}
+function isStarred(w) { return STARS.has(w.id); }
+function toggleStar(id) {
+  if (STARS.has(id)) STARS.delete(id); else STARS.add(id);
+  try { localStorage.setItem(STAR_KEY, JSON.stringify([...STARS])); } catch (e) {}
+}
 
 // Portable mode: build_portable.py fills <script id="audio-data"> with base64
 // audio so the file works fully offline (phone). Empty here = use audio/ folder.
@@ -200,6 +218,7 @@ function getFiltered() {
   if (sort === 'alpha-asc') arr.sort((a, b) => a.word.localeCompare(b.word));
   else if (sort === 'alpha-desc') arr.sort((a, b) => b.word.localeCompare(a.word));
   else if (sort === 'no-desc') arr.sort((a, b) => b._no - a._no);
+  else if (sort === 'star') arr.sort((a, b) => (isStarred(b) - isStarred(a)) || (a._no - b._no));
   else arr.sort((a, b) => a._no - b._no); // default no-asc
 
   return arr;
@@ -219,7 +238,9 @@ function render() {
     const exAudioPath = w.audioExample || ('audio/' + audioId(w.word) + '_ex.mp3');
     const exHtml = w.example ? `<div class="example-cell"><span class="text">${escapeHtml(w.example)}</span><button class="play-btn small" data-audio="${exAudioPath}">▶</button></div>` : '';
 
+    const starred = isStarred(w);
     tr.innerHTML = `
+      <td class="star"><span class="star-btn ${starred ? 'on' : ''}" data-star="${w.id}">${starred ? '★' : '☆'}</span></td>
       <td class="no">${w._no}</td>
       <td class="audio"><button class="play-btn" data-audio="${audioPath}">▶</button></td>
       <td class="word">${escapeHtml(w.word)}</td>
@@ -239,6 +260,8 @@ function escapeHtml(s) {
 // audio playback (single-word + example)
 let currentAudio = null;
 document.addEventListener('click', e => {
+  const star = e.target.closest('.star-btn');
+  if (star) { toggleStar(star.dataset.star); render(); return; }
   const btn = e.target.closest('.play-btn');
   if (!btn) return;
   const path = btn.dataset.audio;
